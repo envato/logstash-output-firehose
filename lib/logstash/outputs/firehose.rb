@@ -70,9 +70,6 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
     #Aws.eager_autoload!(Aws::Firehose)
     #Aws.eager_autoload!(services: %w(Firehose))
 
-    # Create Firehose API client
-    @firehose = aws_firehose_client
-
     # Validate stream name
     if @stream.nil? || @stream.empty?
       @logger.error("Firehose: stream name is empty", :stream => @stream)
@@ -105,8 +102,7 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
   # Build AWS Firehose client
   private
   def aws_firehose_client
-    @logger.info "Registering Firehose output", :stream => @stream, :region => @region
-    @firehose = Aws::Firehose::Client.new(aws_full_options)
+    @firehose ||= Aws::Firehose::Client.new(aws_full_options)
   end
 
   # Build and return AWS client options map
@@ -137,7 +133,7 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
     @logger.debug "Pushing encoded event: #{encoded_event}"
 
     begin
-      @firehose.put_record({
+      aws_firehose_client.put_record({
         delivery_stream_name: @stream,
         record: {
             data: encoded_event
