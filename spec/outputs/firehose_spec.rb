@@ -19,8 +19,6 @@ describe LogStash::Outputs::Firehose do
 
     # Setup Firehose client
     output.stream = "aws-test-stream"
-    output.access_key_id = "Key ID"
-    output.secret_access_key = "Secret key"
     output.register
   end
 

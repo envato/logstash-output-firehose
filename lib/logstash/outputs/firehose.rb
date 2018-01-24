@@ -45,8 +45,6 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
 
   # make properties visible for tests
   attr_accessor :stream
-  attr_accessor :access_key_id
-  attr_accessor :secret_access_key
   attr_accessor :codec
 
   config_name "firehose"
@@ -57,8 +55,6 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
   # Firehose stream info
   config :region, :validate => :string, :default => "us-east-1"
   config :stream, :validate => :string
-  config :access_key_id, :validate => :string
-  config :secret_access_key, :validate => :string
 
   #
   # Register plugin
