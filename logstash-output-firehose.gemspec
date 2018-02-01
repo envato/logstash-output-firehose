@@ -24,4 +24,5 @@ Gem::Specification.new do |s|
   s.add_runtime_dependency "logstash-codec-line"
   s.add_runtime_dependency "logstash-codec-json_lines"
   s.add_development_dependency "logstash-devutils"
+  s.add_development_dependency "timecop"
 end
