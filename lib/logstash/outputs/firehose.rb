@@ -177,6 +177,7 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
       rounds.times do
         @event_buffer_lock.synchronize do
           events = @event_buffer.slice!(0, 500)
+          break if events.nil?
           aws_firehose_client.put_record_batch({
             delivery_stream_name: @stream,
             records: events.map { |e| {data: e} }
@@ -189,7 +190,6 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
       raise LogStash::Error, "Firehose: AWS resource not found error: #{error}"
     rescue Exception => error
       @logger.error "Firehose: AWS delivery error", :error => error
-      @logger.info "Failed to deliver event: #{encoded_event}"
     end
   end
 

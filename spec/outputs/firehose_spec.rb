@@ -97,5 +97,11 @@ describe LogStash::Outputs::Firehose do
         subject.multi_receive([])
       end
     end
+
+    it "doesn't crash if no events are sent" do
+      Thread.new { subject.multi_receive(Array.new(499, sample_event_1)) }
+      Thread.new { subject.multi_receive([sample_event_1, sample_event_2]) }
+      expect { subject.multi_receive([sample_event_1, sample_event_2]) }.not_to raise_exception
+    end
   end
 end
