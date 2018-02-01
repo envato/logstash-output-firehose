@@ -79,10 +79,13 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
     end
 
     # Register coder: comma separated line -> SPECIFIED_CODEC_FMT, call handler after to deliver encoded data to Firehose
+    @event_buffer_lock = Mutex.new
     @event_buffer = Array.new
     @codec.on_event do |event, encoded_event|
       @logger.debug("Event info", :event => event, :encoded_event => encoded_event)
-      @event_buffer.push(encoded_event)
+      @event_buffer_lock.synchronize do
+        @event_buffer.push(encoded_event)
+      end
     end
   end
 
@@ -170,13 +173,15 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
     @logger.debug "Pushing encoded events"
 
     begin
-      @event_buffer.each_slice(500) do |events|
-        aws_firehose_client.put_record_batch({
-          delivery_stream_name: @stream,
-          records: events.map { |e| {data: e} }
-        })
-        # This will result in duplicate results if some failed to send
-        @event_buffer.slice(500)
+      rounds = (@event_buffer.length / 500.0).ceil
+      rounds.times do
+        @event_buffer_lock.synchronize do
+          events = @event_buffer.slice!(0, 500)
+          aws_firehose_client.put_record_batch({
+            delivery_stream_name: @stream,
+            records: events.map { |e| {data: e} }
+          })
+        end
       end
     rescue Aws::Firehose::Errors::ResourceNotFoundException => error
       # Firehose stream not found
