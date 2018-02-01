@@ -173,7 +173,7 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
       @event_buffer.each_slice(500) do |events|
         aws_firehose_client.put_record_batch({
           delivery_stream_name: @stream,
-          record: events.map { |e| {data: e} }
+          records: events.map { |e| {data: e} }
         })
         # This will result in duplicate results if some failed to send
         @event_buffer.slice(500)

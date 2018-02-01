@@ -47,7 +47,7 @@ describe LogStash::Outputs::Firehose do
     it "returns same string" do
       expect(firehose_double).to receive(:put_record_batch).with({
         delivery_stream_name: stream_name,
-        record: [
+        records: [
           {
             data: expected_event
           },
