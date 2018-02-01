@@ -47,6 +47,8 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
   attr_accessor :stream
   attr_accessor :codec
 
+  concurrency :single
+
   config_name "firehose"
 
   # Output coder
@@ -77,9 +79,10 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
     end
 
     # Register coder: comma separated line -> SPECIFIED_CODEC_FMT, call handler after to deliver encoded data to Firehose
+    @event_buffer = Array.new
     @codec.on_event do |event, encoded_event|
       @logger.debug("Event info", :event => event, :encoded_event => encoded_event)
-      handle_event(encoded_event)
+      @event_buffer.push(encoded_event)
     end
   end
 
@@ -88,7 +91,17 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
   public
   def receive(event)
     @codec.encode(event)
+
+    handle_event
   end # def event
+
+  def multi_receive(events)
+    events.each do |event|
+      @codec.encode(event)
+    end
+
+    handle_events
+  end # def multi_receive
 
 
   #
@@ -118,14 +131,18 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
 
   # Handle encoded event, specifically deliver received event into Firehose stream
   private
-  def handle_event(encoded_event)
-    # TODO Multithreaded workers pool?
-    push_data_into_stream encoded_event
+  def handle_event
+    push_data_into_stream
+  end
+
+  def handle_events
+    push_batch_into_stream
   end
 
   # Push encoded data into Firehose stream
   private
-  def push_data_into_stream(encoded_event)
+  def push_data_into_stream
+    encoded_event = @event_buffer.pop
     @logger.debug "Pushing encoded event: #{encoded_event}"
 
     begin
@@ -146,6 +163,28 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
       @logger.error "Firehose: AWS delivery error", :error => error
       @logger.info "Failed to deliver event: #{encoded_event}"
       @logger.error "TODO Retry and fallback policy implementation"
+    end
+  end
+
+  def push_batch_into_stream
+    @logger.debug "Pushing encoded events"
+
+    begin
+      @event_buffer.each_slice(500) do |events|
+        aws_firehose_client.put_record_batch({
+          delivery_stream_name: @stream,
+          record: events.map { |e| {data: e} }
+        })
+        # This will result in duplicate results if some failed to send
+        @event_buffer.slice(500)
+      end
+    rescue Aws::Firehose::Errors::ResourceNotFoundException => error
+      # Firehose stream not found
+      @logger.error "Firehose: AWS resource error", :error => error
+      raise LogStash::Error, "Firehose: AWS resource not found error: #{error}"
+    rescue Exception => error
+      @logger.error "Firehose: AWS delivery error", :error => error
+      @logger.info "Failed to deliver event: #{encoded_event}"
     end
   end
 
