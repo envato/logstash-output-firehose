@@ -164,7 +164,7 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
       # Firehose stream not found
       @logger.error "Firehose: AWS resource error", :error => error
       raise LogStash::Error, "Firehose: AWS resource not found error: #{error}"
-    rescue Exception => error
+    rescue Aws::Firehose::Errors::ServiceError => error
       # TODO Retry policy
       # TODO Fallback policy
       # TODO Keep failed events somewhere, probably in fallback file
