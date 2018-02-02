@@ -67,12 +67,6 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
   # Register plugin
   public
   def register
-    # require "aws-sdk"
-    # required if using ruby version < 2.0
-    # http://ruby.awsblog.com/post/Tx16QY1CI5GVBFT/Threading-with-the-AWS-SDK-for-Ruby
-    #Aws.eager_autoload!(Aws::Firehose)
-    #Aws.eager_autoload!(services: %w(Firehose))
-
     # Validate stream name
     if @stream.nil? || @stream.empty?
       @logger.error("Firehose: stream name is empty", :stream => @stream)
