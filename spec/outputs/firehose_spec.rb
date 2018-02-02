@@ -15,6 +15,7 @@ describe LogStash::Outputs::Firehose do
   let(:expected_event) { "#{time_now.strftime("%FT%H:%M:%S.%3NZ")} %{host} 123,someValue,1234567890" }
   let(:firehose_double) { instance_double(Aws::Firehose::Client) }
   let(:stream_name) { "aws-test-stream" }
+  let(:oversized_event) { "A" * 999_999 }
   subject { LogStash::Outputs::Firehose.new({"codec" => "plain"}) }
 
   before do
@@ -40,6 +41,11 @@ describe LogStash::Outputs::Firehose do
       Timecop.freeze(time_now) do
         subject.receive(sample_event)
       end
+    end
+
+    it "doesn't attempt to send a record greater than 1000 KB" do
+      expect(firehose_double).not_to receive(:put_record)
+      subject.receive([oversized_event * 2])
     end
   end
 
@@ -109,10 +115,14 @@ describe LogStash::Outputs::Firehose do
     end
 
     context "oversized events are sent" do
-      let(:oversized_event) { "A" * 1_000_000 }
       it "doesn't attempt to send payloads greater than 4MB" do
         expect(firehose_double).to receive(:put_record_batch).twice
         subject.multi_receive(Array.new(5, oversized_event))
+      end
+      
+      it "doesn't attempt to send a record greater than 1000 KB" do
+        expect(firehose_double).not_to receive(:put_record_batch)
+        subject.multi_receive([oversized_event * 2])
       end
     end
   end
