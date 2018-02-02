@@ -96,7 +96,6 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
 
   #
   # On event received handler: just wrap as JSON and pass it to handle_event method
-  public
   def receive(event)
     @codec.encode(event)
 
@@ -111,25 +110,7 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
     handle_events
   end # def multi_receive
 
-
-  #
-  # Helper methods
-  #
-
-  # Build AWS Firehose client
-  private
-  def aws_firehose_client
-    @firehose ||= Aws::Firehose::Client.new(aws_full_options)
-  end
-
-  # Build and return AWS client options map
-  private
-  def aws_full_options
-    aws_options_hash
-  end
-
   # Evaluate AWS endpoint for Firehose based on specified @region option
-  public
   def aws_service_endpoint(region)
     return {
         :region => region,
@@ -137,24 +118,23 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
     }
   end
 
-  # Handle encoded event, specifically deliver received event into Firehose stream
   private
-  def handle_event
-    push_data_into_stream
+
+  # Build AWS Firehose client
+  def aws_firehose_client
+    @firehose ||= Aws::Firehose::Client.new(aws_full_options)
   end
 
-  def handle_events
-    push_batch_into_stream
+  # Build and return AWS client options map
+  def aws_full_options
+    aws_options_hash
   end
-
-  # Push encoded data into Firehose stream
-  private
 
   def oversized_event(event)
     event.bytesize > FIREHOSE_PUT_RECORD_SIZE_LIMIT
   end
 
-  def push_data_into_stream
+  def handle_event
     encoded_event = @event_buffer.pop
     @logger.debug "Pushing encoded event: #{encoded_event}"
 
@@ -177,11 +157,9 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
       raise LogStash::Error, "Firehose: AWS resource not found error: #{error}"
     rescue Aws::Firehose::Errors::ServiceError => error
       # TODO Retry policy
-      # TODO Fallback policy
-      # TODO Keep failed events somewhere, probably in fallback file
+      # Permanently failing events can be pushed to a DLQ by Logstash
       @logger.error "Firehose: AWS delivery error", :error => error
       @logger.info "Failed to deliver event: #{encoded_event}"
-      @logger.error "TODO Retry and fallback policy implementation"
     end
   end
 
@@ -189,41 +167,31 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
     array.collect(&:bytesize).inject(0, :+)
   end
 
-  def oversized_events(events)
+  def remove_oversized_events(events)
     undersized_events = events.reject { |event| oversized_event(event) }
     oversized_events = events - undersized_events
-    [undersized_events, oversized_events]
+    if oversized_events.length > 0
+      @logger.error "#{oversized_events.length} events are too big for Firehose, they will not be sent"
+    end
+    undersized_events
   end
 
-  def push_batch_into_stream
+  def handle_events
     @logger.debug "Pushing encoded events"
 
     begin
       rounds = (@event_buffer.length / FIREHOSE_PUT_BATCH_RECORD_LIMIT.to_f).ceil
       rounds.times do
+        events = []
         @event_buffer_lock.synchronize do
           events = @event_buffer.slice!(0, FIREHOSE_PUT_BATCH_RECORD_LIMIT)
-          break if events.nil?
-
-          events, oversized = oversized_events(events)
-          if oversized.length > 0
-            @logger.error "#{oversized.length} events are too big for Firehose, they will not be sent"
-          end
-
-          break if events.empty?
-
-          if array_size(events) > FIREHOSE_PUT_BATCH_SIZE_LIMIT
-            while events.length > 0
-              event_chunk = []
-              while events.length > 0 && (array_size(event_chunk) + events.last.bytesize) < FIREHOSE_PUT_BATCH_SIZE_LIMIT
-                event_chunk << events.pop
-              end
-              put_batch(event_chunk)
-            end
-          else
-            put_batch(events)
-          end
         end
+        break if events.nil?
+
+        events = remove_oversized_events(events)
+        break if events.empty?
+
+        put_in_batches(events)
       end
     rescue Aws::Firehose::Errors::ResourceNotFoundException => error
       # Firehose stream not found
@@ -231,6 +199,20 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
       raise LogStash::Error, "Firehose: AWS resource not found error: #{error}"
     rescue Aws::Firehose::Errors::ServiceError => error
       @logger.error "Firehose: AWS delivery error", :error => error
+    end
+  end
+
+  def put_in_batches(events)
+    if array_size(events) > FIREHOSE_PUT_BATCH_SIZE_LIMIT
+      while events.length > 0
+        event_chunk = []
+        while events.length > 0 && (array_size(event_chunk) + events.last.bytesize) < FIREHOSE_PUT_BATCH_SIZE_LIMIT
+          event_chunk << events.pop
+        end
+        put_batch(event_chunk)
+      end
+    else
+      put_batch(events)
     end
   end
 
