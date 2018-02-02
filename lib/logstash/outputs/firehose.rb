@@ -188,7 +188,7 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
       # Firehose stream not found
       @logger.error "Firehose: AWS resource error", :error => error
       raise LogStash::Error, "Firehose: AWS resource not found error: #{error}"
-    rescue Exception => error
+    rescue Aws::Firehose::Errors::ServiceError => error
       @logger.error "Firehose: AWS delivery error", :error => error
     end
   end
