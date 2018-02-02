@@ -43,6 +43,11 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
   TEMPFILE_EXTENSION = "txt"
   FIREHOSE_STREAM_VALID_CHARACTERS = /[\w\-]/
 
+  # These are hard limits
+  FIREHOSE_PUT_BATCH_SIZE_LIMIT = 4_000_000 # 4MB
+  FIREHOSE_PUT_BATCH_RECORD_LIMIT = 500
+  FIREHOSE_PUT_RECORD_SIZE_LIMIT = 1_000
+
   # make properties visible for tests
   attr_accessor :stream
   attr_accessor :codec
@@ -169,19 +174,31 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
     end
   end
 
+  def array_size(array)
+    array.collect(&:bytesize).inject(0, :+)
+  end
+
   def push_batch_into_stream
     @logger.debug "Pushing encoded events"
 
     begin
-      rounds = (@event_buffer.length / 500.0).ceil
+      rounds = (@event_buffer.length / FIREHOSE_PUT_BATCH_RECORD_LIMIT.to_f).ceil
       rounds.times do
         @event_buffer_lock.synchronize do
-          events = @event_buffer.slice!(0, 500)
+          events = @event_buffer.slice!(0, FIREHOSE_PUT_BATCH_RECORD_LIMIT)
           break if events.nil?
-          aws_firehose_client.put_record_batch({
-            delivery_stream_name: @stream,
-            records: events.map { |e| {data: e} }
-          })
+
+          if array_size(events) > FIREHOSE_PUT_BATCH_SIZE_LIMIT
+            while events.length > 0
+              event_chunk = []
+              while events.length > 0 && (array_size(event_chunk) + events.last.bytesize) < FIREHOSE_PUT_BATCH_SIZE_LIMIT
+                event_chunk << events.pop
+              end
+              put_batch(event_chunk)
+            end
+          else
+            put_batch(events)
+          end
         end
       end
     rescue Aws::Firehose::Errors::ResourceNotFoundException => error
@@ -191,6 +208,13 @@ class LogStash::Outputs::Firehose < LogStash::Outputs::Base
     rescue Aws::Firehose::Errors::ServiceError => error
       @logger.error "Firehose: AWS delivery error", :error => error
     end
+  end
+
+  def put_batch(events)
+    aws_firehose_client.put_record_batch({
+      delivery_stream_name: @stream,
+      records: events.map { |e| {data: e} }
+    })
   end
 
 end # class LogStash::Outputs::Firehose

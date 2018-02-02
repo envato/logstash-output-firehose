@@ -99,9 +99,21 @@ describe LogStash::Outputs::Firehose do
     end
 
     it "doesn't crash if no events are sent" do
-      Thread.new { subject.multi_receive(Array.new(499, sample_event_1)) }
-      Thread.new { subject.multi_receive([sample_event_1, sample_event_2]) }
+      # Necessary to replicate our race condition
+      a = Thread.new { subject.multi_receive(Array.new(499, sample_event_1)) }
+      b = Thread.new { subject.multi_receive([sample_event_1, sample_event_2]) }
       expect { subject.multi_receive([sample_event_1, sample_event_2]) }.not_to raise_exception
+      # Ensure rspec doubles don't leak into other examples
+      a.join
+      b.join
+    end
+
+    context "oversized events are sent" do
+      let(:oversized_event) { "A" * 1_000_000 }
+      it "doesn't attempt to send payloads greater than 4MB" do
+        expect(firehose_double).to receive(:put_record_batch).twice
+        subject.multi_receive(Array.new(5, oversized_event))
+      end
     end
   end
 end
